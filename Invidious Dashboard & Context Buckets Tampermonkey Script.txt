@@ -1,0 +1,133 @@
+Invidious Dashboard & Context Buckets (v50.1)
+
+A massive, feature-rich Tampermonkey userscript that completely overhauls the local Invidious experience. It transforms a standard Invidious instance into a highly customizable, true-dark mode media dashboard with categorized "Context Buckets", a custom SPA Audio Shuffle engine, Transcript integration, and hardware-level video optimizations.
+🚀 Key Features
+
+    Context Buckets: Categorize your YouTube subscriptions into custom tabs (e.g., Tech, Gaming, News).
+
+    Reactive Scraping Engine: Infinite scrolling and "Targeted Fetch" ensures missing channels in your active bucket are hunted down and injected into the feed seamlessly.
+
+    Proton Cloud Sync: Talks to a local Python bridge (http://127.0.0.1:5001) to backup and restore your categories globally.
+
+    RTX Video Super Resolution (VSR) Unlocker: Strips native CSS transforms and filters from the video element to allow GPU-level upscaling.
+
+    SPA Audio Shuffle Engine: Hijacks playlists, extracts all videos, and replaces the watch page with a custom, lightweight Single Page Application audio player.
+
+    Clean Transcript Bridge: One-click fetching and VTT-cleaning of video transcripts via the Python bridge.
+
+    Monolith UI & Sidebar Tracker: A unified global header, monochrome Ionicons, and a slide-out tracker sidebar to monitor missing uploads, account status, and watch history.
+
+⚙️ Prerequisites
+
+    Tampermonkey / Greasemonkey extension installed.
+
+    Local Invidious Instance: Must be running on http://127.0.0.1:3000. (Includes a Port Guard to prevent hijacking other local services like Sonarr/Prowlarr).
+
+    Python API Bridge: Requires a companion backend running on http://127.0.0.1:5001 handling /get-buckets, /save-buckets, and /get-transcript.
+
+🧩 Architecture & Function Breakdown
+
+The script is modularized into several core engines. Here is exactly how everything works under the hood.
+0. Data Scraper & Clutter Removal
+
+    extractUserData()
+    Parses the native DOM to determine login state, scrape the username, and grab notification counts. It uses bulletproof string matching to bypass Invidious theme CSS quirks, falling back to raw HTML parsing if necessary.
+
+    hideNativeHeaderJunk()
+    Aggressively hides native sub-navigation menus (Popular, Trending) and floating notification texts, preparing the canvas for the custom Monolith Header.
+
+1. Cloud Storage Logic
+
+    loadBuckets()
+    Fetches the user's category configurations from the Python Bridge (/get-buckets). Normalizes the data, removing duplicates, and kicks off the live DOM update.
+
+    saveBuckets(data)
+    Posts updated bucket configurations (channel lists and tab ordering) back to the Python Bridge.
+
+2. DOM Helpers & Cache
+
+    updateCache(name, url): Maintains a localStorage dictionary pairing channel names with their precise URLs to speed up future targeted scraping.
+
+    getVideoGrid(): Intelligently locates the main video grid on any page, dodging injected custom headers.
+
+    getSafeCards(): Returns an array of clean video nodes, ignoring navigation elements.
+
+    getCleanName(el): Sanitizes scraped text (stripping line breaks, zero-width spaces, and "Verified" badges).
+
+    extractNextPageUrl(docNode): Finds the native pagination button to fuel the infinite scroller.
+
+3. Hardware & Playback Optimization
+
+    optimizePlayback()
+    Targeting the watch page, this forces transform: translateZ(0px), image-rendering: auto, and disables CSS masks/filters on the <video> tag. This is required to trick Nvidia RTX VSR into engaging properly on Chromium browsers.
+
+4. Fetching & Pagination Engine
+
+    fillBucket()
+    The infinite scroll engine. If viewing "ALL", it dynamically fetches the Next Page URL, parses the incoming DOM, and appends unique videos to the grid. If viewing a specific Bucket, it cross-references MISSING_CHANNELS_NAMES and delegates to targetedFetch.
+
+    targetedFetch(channelName)
+    A highly aggressive scraper. If a channel is expected in a bucket but hasn't posted recently, this function:
+
+        Looks up the channel URL in the cache (or performs a background /search to find it).
+
+        Fetches the channel's profile page.
+
+        Scrapes their latest video and injects it chronologically into your feed.
+
+5. Reactive UI Engine
+
+    applyChangesLive()
+    The heart of the script. Runs continuously via an interval on the Subscriptions page. It identifies all video cards on screen, assigns them their specific "Bucket Tag", and toggles their visibility (.bucket-hidden) based on the currently active tab. Automatically forces re-ordering to maintain chronological accuracy.
+
+    updateStatsPanel(displayList)
+    Populates the slide-out sidebar (#bucket-debug-panel). It generates real-time statistics of videos found vs. missing, renders MIA alerts, and creates clickable anchor links that smoothly scroll you to specific videos in the grid.
+
+6. Modals & Injections
+
+    openSettingsModal() / openManagerModal(channelName)
+    Generates dark-mode modal overlays for managing your categories. Allows users to create new buckets, reorder tabs, purge tags, and assign channels to specific buckets.
+
+    injectDashboardHeader()
+    Destroys the native navbar and installs the "Monolith Header" at the very top of <body>. Includes the search bar, active bucket tabs, horizontal scroll areas, and global tool buttons.
+
+    setupGestures()
+    Binds Shift + Mouse Wheel. On the subscriptions page, this accelerates the TARGET_PAGES depth for infinite scroll. On other pages, it acts as a fast previous/next page clicker.
+
+7. Transcript Bridge
+
+    cleanVTT(rawText)
+    Regex-powered utility that strips VTT timestamps, HTML tags, and duplicate lines from raw transcript data, outputting clean, readable text.
+
+    injectTranscriptButton()
+    Injects a document icon into the video.js player controls. When clicked, it pings the Python Bridge for the video's transcript, processes it via cleanVTT, and automatically copies it to the user's clipboard.
+
+8. SPA Audio Shuffle Engine
+
+    initTrueShuffle()
+    A complete overhaul of playlist behavior:
+
+        Playlist Hooking: Injects an "Audio Shuffle" button on playlist pages. When clicked, it scrapes all Video IDs, perfectly shuffles them in memory (sessionStorage), and redirects to the Watch page with a special ?audio_shuffle=true flag.
+
+        SPA Hijack: On the Watch page, it obliterates the native Video player, Comments, and Related videos.
+
+        Custom Player UI: Replaces the DOM with a custom UI (Thumbnail, Title, Author, Audio Controls).
+
+        playTrack(videoId) & playNextTrack(): Calls the Invidious API natively (/api/v1/videos/) to extract the lowest-bandwidth .mp4 audio stream. Plays it seamlessly in an HTML5 <audio> tag, auto-advancing to the next track when finished.
+
+9. Bootstrapper
+
+    init()
+    The central coordinator. Fires at document-end. It checks the URL path to determine what context it is in (Feed vs Watch vs Playlist) and fires the necessary listeners, DOM mutations, and API loops accordingly.
+
+🎨 CSS Styling Overview
+
+The script injects a massive stylesheet (#bucket-styles-v43-3) handling:
+
+    Global True Dark Mode: Pure #0f0f0f backgrounds, #f1f1f1 text.
+
+    Icon Eradication: Destroys all native SVG/Icon clutter on video cards for a minimalist look.
+
+    Animations: "Soft White Neon Pulse" for highlighting videos when clicked from the sidebar.
+
+    Flexbox Grids: Ensures the custom monolithic header and custom SPA player are perfectly centered and responsive without relying on fragile absolute positioning.
