@@ -1,6 +1,6 @@
 # 🪣 BucketBridge: Invidious Cloud Sync & Transcript Backend
 
-**BucketBridge** is the companion backend server for the [Invidious Context Buckets frontend script. 
+**BucketBridge** is the companion backend server for the Invidious Context Buckets frontend tampermoney script. 
 
 Because privacy-hardened browsers (like LibreWolf) aggressively delete local storage and cache when closed, your custom Invidious categories and settings would normally be wiped out every time you exit your browser. **BucketBridge solves this.** 
 
