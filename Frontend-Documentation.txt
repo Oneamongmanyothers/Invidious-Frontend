@@ -1,0 +1,294 @@
+Here is the ultimate, exhaustive documentation file. It is specifically tailored to your exact instructions: No summarizing, every single function is explicitly cataloged and explained, and the LibreWolf/Gecko engine requirement is placed front and center.
+
+This document explains the what, the how, and most importantly, the why, making it the perfect handoff file for future maintainers or future AI tools.
+🪣 Invidious: Context Buckets & SPA Stealth Engine (v63.0)
+
+    ⚠️ MAINTAINER NOTICE (READ BEFORE USING):
+    This script was engineered specifically for LibreWolf and the Gecko browser engine.
+
+    Why Chromium/Brave will fail: Chromium-based browsers (specifically Brave) have aggressive cross-origin restrictions and local-network "Shields" that outright block webpage scripts from communicating with local ports. This script relies on talking to a local Python Bridge (http://127.0.0.1:5001) to save data. Chromium will block this natively.
+
+    Why LibreWolf requires this specific architecture: LibreWolf is a privacy-hardened browser designed to aggressively wipe caches, cookies, and standard localStorage the moment the browser closes. To ensure user settings (Volume, Video Progress, Channel Cache) survive browser restarts, this script completely bypasses standard web storage and stores critical variables deep inside Tampermonkey's isolated GM_getValue and GM_setValue extension vault.
+
+    This is provided AS-IS. I am not providing tech support, I am not troubleshooting Chromium browser issues, and I am not taking feature requests.
+
+🧩 Comprehensive Function Directory
+
+The script is divided into distinct, modular engines. Below is a detailed, un-summarized breakdown of every single function in the codebase.
+0. Advanced Logging & Toast System
+
+Because the script manages asynchronous background API fetching, standard console.log output is insufficient for debugging. This engine provides a robust state-tracking system.
+
+    showToast(message, type = 'info')
+
+        Constructs and injects a custom, floating UI notification at the bottom right of the screen.
+
+        Uses dynamic CSS to animate (slide-in/fade-in) and color-codes the notification based on the type parameter (Blue for Info, Orange for Warn, Red for Error, Green for Success).
+
+        Automatically assigns a setTimeout to self-destruct and remove the node from the DOM after 5 seconds.
+
+    bLog(level, context, msg, err = null)
+
+        The master logger. It generates a formatted string with a timestamp, pushes it to standard console.log, and simultaneously stores it in a persistent global LOG_DATA array.
+
+        The Anti-Spam Failsafe: It utilizes an ERROR_TRACKER dictionary. If the local proxy rate-limits the user and throws identical WARN or ERROR messages rapidly, it tracks the signature. If a signature fires 5 times (ERROR_THRESHOLD), it triggers showToast() to alert the user, then flags alerted = true to prevent infinite Toast spam.
+
+    downloadLogs()
+
+        Takes the massive LOG_DATA array, converts it into a binary Blob object (type: 'text/plain'), and creates a temporary <a> element in the DOM.
+
+        Automatically clicks the link to force the browser to download a .txt file containing the complete chronological session log.
+
+1. Initialization & DOM Data Scrapers
+
+These functions run immediately on boot to establish the user's environment before heavy lifting begins.
+
+    init()
+
+        The central bootstrapper attached to document-end. It reads window.location.pathname to dictate which modules to fire.
+
+        If on /feed/subscriptions, it triggers the 1000ms setInterval for applyChangesLive(), wrapped in a Visibility State Throttle (it only runs if the tab is actively focused, saving massive CPU overhead on background tabs).
+
+        If on a /watch page, it hooks the hardware VSR optimizers, the Tab Sync engines, and the Auto-Speed controllers.
+
+    extractUserData()
+
+        Invidious themes are highly variable. This function crawls the DOM looking for native a (links) and form elements containing "logout" or "signout" to definitively prove the user is authenticated.
+
+        It extracts the username by traversing the DOM tree relative to the logout button. It then uses a TreeWalker to scan raw text nodes for the string "unseen notifications" to extract the notification count for the custom sidebar.
+
+    hideNativeHeaderJunk()
+
+        Checks if the user is on a Feed page (/subscriptions, /popular, /trending).
+
+        Aggressively targets native Invidious sub-navigation menus (.pure-menu, .h-box) and sets them to display: none. This cleans the physical HTML canvas so the custom Monolith Header can be injected without overlapping native UI elements.
+
+2. State Memory & Cloud Sync
+
+Handles communication with the external Python Bridge and Tampermonkey's persistent vault.
+
+    updateCache(name, url)
+
+        Receives a channel name and its relative URL. Updates the global CHANNEL_CACHE dictionary and instantly writes it to GM_setValue('bucket_channel_cache_gm').
+
+        Why: To fetch a channel's newest video via the API, the script needs the channel's UCID (Unique Channel ID). Caching the URL prevents the script from having to relentlessly query the YouTube Search API just to resolve names to IDs.
+
+    loadBuckets()
+
+        Fires an asynchronous fetch() to http://127.0.0.1:5001/get-buckets.
+
+        Parses the JSON and normalizes the data. It ensures every category has an order integer, a channels array, and an ignoreShortsTimer boolean to prevent undefined reference crashes later in the code.
+
+    saveBuckets(data)
+
+        Serializes the BUCKETS dictionary into a JSON string and POSTs it back to the Python bridge, effectively saving category sorting and channel assignments globally across the machine.
+
+    generateDailyMix()
+
+        Called exclusively when the user selects the ALL tab. It iterates through every custom Context Bucket.
+
+        It uses Math.random() to shuffle the array of channels in each bucket, then slice(0, 2) to extract exactly two random channels per category. It writes these to DAILY_MIX_CHANNELS. This transforms the overwhelming "ALL" tab into a curated, lightweight, 20-30 video homepage.
+
+3. Media Playback & Quality of Life
+
+Scripts dedicated to optimizing the native HTML5 <video> player on watch pages.
+
+    setupTabSync(mediaElem)
+
+        Instantiates a BroadcastChannel. Hooks into the video player's play event.
+
+        When the video plays, it broadcasts a PLAY message to all other open LibreWolf tabs. If a background tab receives this message and is currently playing a video, it immediately forces .pause().
+
+        Why: Local Invidious proxies frequently crash or severe connections if forced to stream multiple high-bandwidth media chunks concurrently.
+
+    setupProgressMemory(mediaElem, videoId)
+
+        Hooks into the player's timeupdate event. Every 5 seconds, it writes the current video timestamp to GM_setValue using the video's unique ID as the key.
+
+        On video load, it checks the vault. If a saved timestamp exists (and the user didn't finish the video), it forces mediaElem.currentTime to the saved stamp and fires a Success Toast to alert the user.
+
+    handleAutoSpeed(mediaElem)
+
+        Parses the video title and channel name. If it detects keywords related to music (e.g., "lyrics", "ost", "album"), it leaves the speed at 1.0x.
+
+        If it is a standard video, it measures duration. Videos > 10 minutes are forced to 1.5x. Videos > 25 minutes are forced to 2.0x.
+
+    optimizePlayback()
+
+        Injects inline CSS into the native <video> tag, forcing transform: translateZ(0px) and stripping native CSS masks/filters.
+
+        Why: Native Chromium/Gecko browsers often disable hardware-level GPU upscaling (Nvidia RTX VSR) if the video element has complex CSS properties layered over it. This guarantees the GPU engages.
+
+4. DOM Helpers & Geometry
+
+Functions designed to navigate and understand the native Invidious HTML structure.
+
+    getVideoGrid()
+
+        Queries all .pure-g (CSS Grid) elements on the page. It counts how many <a href="/watch"> nodes are inside each grid. It returns the grid containing the highest count. This guarantees the script targets the main video layout rather than navigational sidebars.
+
+    getSafeCards()
+
+        A foolproof sweep of the #contents and #related wrappers looking for any video card.
+
+        Why: Invidious natively renders active Livestreams and Premieres in entirely separate, disjointed CSS grids floating above the main grid. getSafeCards() rips these live videos out of their isolated grids so they can be merged and sorted with standard videos.
+
+    getCleanName(el)
+
+        A string-scrubbing utility. Strips invisible line breaks, zero-width spaces, and injected "Verified" text from channel HTML nodes.
+
+    extractNextPageUrl(docNode)
+
+        Scans a provided HTML document (either the live page or a background-fetched DOM) for the "Next page" <a> button and extracts its absolute URL to fuel the infinite scroller.
+
+5. API Fetching & Batch Scraper
+
+The engine that bypasses the native chronological feed and selectively pulls data.
+
+    buildVideoCard(vid, channelName, channelUrl, isShort)
+
+        Takes JSON metadata from the API and constructs a physical Invidious HTML video card.
+
+        SVG Injection: Rather than passing the vid.videoThumbnails URL to the src attribute, it assigns it to data-src. It injects a dark-gray 16:9 vector SVG (data:image/svg+xml) as the physical image.
+
+        Why: This forces the DOM to hold the physical geometric shape of a thumbnail, preventing the HTML layout from collapsing to 0 pixels before the lazy-loader fetches the real image.
+
+    targetedFetch(channelName)
+
+        The core state-based fetcher. If the UCID is unknown, it queries /api/v1/search.
+
+        It hits /api/v1/channels/{ucid}/videos. It evaluates the BUCKETS[Category].ignoreShortsTimer. If exempt, it accepts any video. If not exempt, it strictly filters out videos < 95 seconds.
+
+        It hits /api/v1/channels/{ucid}/shorts to locate the channel's newest short.
+
+        It physically injects the generated HTML cards into the live DOM with the .bucket-hidden CSS class applied so they remain completely invisible until the Reactive Engine processes them.
+
+    fetchInBatches(channels, batchSize = 10, expectedFilter)
+
+        Takes an array of hundreds of channels and processes them sequentially in chunks of 10 using Promise.all().
+
+        Abort Controller: Before starting the next batch, it checks if CURRENT_FILTER === expectedFilter. If the user clicked a different tab in the UI, the batch instantly terminates to prevent downloading background data for a tab the user is no longer looking at.
+
+    fillBucket()
+
+        The master fetch coordinator.
+
+        If CURRENT_FILTER is UNSORTED, it operates as a native HTML scraper. It fetches the URL found by extractNextPageUrl(), scrubs the incoming HTML of native image src tags to prevent background network flooding, assigns the SVG placeholders, and injects the raw HTML nodes.
+
+        If on a Category tab or ALL, it passes the MISSING_CHANNELS_NAMES array to fetchInBatches() to trigger the API logic.
+
+6. The Reactive Engine
+
+The heartbeat of the dashboard. It runs continuously to sort, hide, and flag DOM nodes.
+
+    applyChangesLive()
+
+        Called every 1000ms. Aborts immediately if not on a valid feed page.
+
+        Tagging Phase: Scans every video card. Cross-references the channel name against getBucketForChannel(). Assigns the data-bucket-category attribute. If it's a subscription page, it physically renders the UI tag (via updateTagInDOM()).
+
+        Shorts Logic: Determines if a video is a Short by checking the API tag, the URL /shorts/, or parsing the .length text node (enforcing < 95 seconds). If marked as a Short, it injects the orange .bucket-short-indicator UI badge over the thumbnail.
+
+        Sorting Phase: Groups all active, visible cards into a dictionary (groupedChannels[ChannelName].full and groupedChannels[ChannelName].short).
+
+        DOM Reordering: It sorts the full array chronologically and injects them at the top of the grid. It sorts the short array chronologically and forces them to the absolute bottom of the grid.
+
+        Finally, it calls updateStatsPanel() to update the sidebar, and observeLazyImages() to trigger network fetches for any thumbnails now visible on screen.
+
+    updateTagInDOM(channelNode, assignedBucket, explicitChannelName)
+
+        Manipulates flexbox CSS to inject a span containing the assigned category name next to the video's channel name, alongside a + button that triggers the Category Manager modal.
+
+    getBucketForChannel(name)
+
+        Iterates through the global BUCKETS dictionary to return the string name of the category a channel is assigned to.
+
+7. Universal Lazy Loader
+
+    LAZY_OBSERVER
+
+        An instance of IntersectionObserver configured with a 300px root margin. When an element enters the viewport, it takes the URL from data-src, applies it to src, removes the data attribute, and applies the .loaded CSS class (triggering a 0.3s CSS opacity fade-in).
+
+    observeLazyImages()
+
+        Queries the DOM for all img.bucket-lazy-img[data-src] that have not yet been processed and registers them with the LAZY_OBSERVER.
+
+8. UI Modals & Menus
+
+    openSettingsModal()
+
+        Generates a massive, dark-mode absolute overlay. Iterates through all Categories to render input fields for order integer assignment.
+
+        Renders the ⏱️ Ignore Duration checkbox per category (binding directly to BUCKETS[key].ignoreShortsTimer), which instructs the API scraper to bypass the 95-second limit for animation/music channels.
+
+        Provides buttons to purge all tags, reset the entire dictionary, or create new categories.
+
+    openManagerModal(channelName)
+
+        Generates an overlay displaying a grid of all available Context Buckets. Highlights the currently assigned bucket. Clicking a bucket mutates the BUCKETS dictionary, saves it to the Python bridge, and forces applyChangesLive() to instantly re-sort the live DOM.
+
+9. Global Monolith Header & Tracking Sidebar
+
+    injectDashboardHeader()
+
+        Constructs and injects a unified, full-width global header (#custom-unified-header) across Feeds, Popular, and Trending pages.
+
+        Migrates the native Search Bar into the header. Generates buttons for Tracker toggling, Log downloading, and Settings. Creates a horizontal overflow flexbox to hold the Category toggle buttons.
+
+    renderButtons(container) & createButton(parent, text, onClick)
+
+        Sorts the Context Buckets by their assigned order integer. Generates physical DOM buttons for ALL, UNSORTED, and every custom category. Binds sessionStorage.setItem('bucket_active_tab') to the click event to preserve state across page reloads.
+
+    updateStatsPanel(displayList)
+
+        Completely replaces the left side of the screen with #bucket-debug-panel.
+
+        Calculates expected channels vs loaded channels. Renders warnings if channels are currently being fetched by the API, or flags them as (MIA) if the API confirmed they have no recent videos.
+
+        Generates clickable anchors containing the channel names. When clicked, it queries the live DOM for the exact video card, executes scrollIntoView(), and applies a CSS @keyframes flashWhite animation to physically highlight the video in the grid.
+
+10. Gestures & UX Input
+
+    setupGestures()
+
+        Attaches global pointerdown, pointerup, contextmenu, and wheel listeners.
+
+        Speed Control: If the user holds the Right Mouse Button and uses the scroll wheel over a video page, it intercepts the scroll event, steps the mediaElem.playbackRate up or down by 0.25, and fires a UI Toast indicating the new speed. (It suppresses the native context menu to prevent UI interruption).
+
+    setupInfiniteScrollHold()
+
+        Upgrades the native Invidious pagination.
+
+        Hooks into the scroll event. It calculates document.documentElement.scrollHeight - window.innerHeight - window.scrollY.
+
+        If the user hits the absolute bottom of the page (scroll distance < 150px) on UNSORTED, POPULAR, or TRENDING, it starts a 1500ms (1.5s) setTimeout. If the user holds their scroll position, it triggers fillBucket() to fetch the next native HTML page. If they scroll up, the timer is cleared.
+
+11. Transcript Bridge
+
+    cleanVTT(rawText)
+
+        A specialized Regex parser. It strips WEBVTT headers, removes native HTML tags (<[^>]+>) injected by YouTube, extracts the precise timestamps (/^(\d{1,2}:)?\d{1,2}:\d{2}([.,]\d+)?/), and drops duplicate text lines common in auto-generated subtitle payloads.
+
+    injectTranscriptButton()
+
+        If on a Watch page, it creates a custom DOM button and inserts it directly into the native video.js control bar (.vjs-captions-button).
+
+        On click, it fires an async fetch to the Python Bridge (/get-transcript?v=), parses the return through cleanVTT(), and writes the clean text to navigator.clipboard.writeText.
+
+12. SPA Audio Shuffle Engine
+
+An entirely custom media player designed to bypass heavy video decoders.
+
+    initTrueShuffle()
+
+        The Playlist Hook: Scans any /playlist page for the "Add Videos" control bar. Injects an "Audio Shuffle" button. When clicked, it queries every <a href="/watch"> on the page, extracts the video IDs, uses a Fisher-Yates array shuffle algorithm, stores the randomized array in sessionStorage, and redirects to the first video with the ?audio_shuffle=true flag.
+
+        The SPA Hijack: If the Watch page detects the URL flag, it initiates an aggressive setInterval. The moment the native player-container renders, it deletes it. It also sets display: none on #related and #comments.
+
+        The UI Injection: Replaces the container with a custom #custom-audio-ui DOM block containing a massive thumbnail viewer, Track Title, Channel Name, and a standard HTML5 <audio> element.
+
+        playTrack(videoId): Fires a direct API call to /api/v1/videos/{videoId}. It extracts the highest quality thumbnail. It parses the adaptiveFormats and formatStreams arrays specifically searching for .mp4 audio-only endpoints. It assigns the raw Googlevideo URL directly to the <audio> src tag.
+
+        playNextTrack(): Bound to the audio element's ended event. It pops the next video ID from the sessionStorage pool, saves the mutated array, and triggers playTrack(). If the pool is empty, it re-shuffles the bucket_audio_original pool and starts over infinitely.
+
+        Features: Bootstraps into setupProgressMemory to remember timestamps, setupTabSync to pause background feeds, and directly accesses GM_getValue('bucket_audio_volume_gm') so the user's volume slider persists across LibreWolf restarts.
